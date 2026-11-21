@@ -1,44 +1,56 @@
 {
-  "_metadata": {
-    "major_version": 1,
-    "minor_version": 1
-  },
-  "display_information": {
-    "name": "slack msg fingerprinter"
-  },
-  "features": {
-    "app_home": {
-      "home_tab_enabled": true,
-      "messages_tab_enabled": false,
-      "messages_tab_read_only_enabled": true
+    "display_information": {
+        "name": "slack msg fingerprinter"
     },
-    "bot_user": {
-      "display_name": "slack msg fingerprinter",
-      "always_online": true
+    "features": {
+        "app_home": {
+            "home_tab_enabled": true,
+            "messages_tab_enabled": false,
+            "messages_tab_read_only_enabled": true
+        },
+        "bot_user": {
+            "display_name": "slack msg fingerprinter",
+            "always_online": true
+        },
+        "shortcuts": [
+            {
+                "name": "Check message client",
+                "type": "message",
+                "callback_id": "sample_shortcut_id",
+                "description": "Check if the message was sent from mobile, PC/Web or something else (eg automated). Results might not be 100% accurate."
+            }
+        ]
     },
-    "shortcuts": [
-      {
-        "name": "Check message client",
-        "type": "message",
-        "callback_id": "sample_shortcut_id",
-        "description": "Check if the message was sent from mobile, PC/Web or something else (eg automated). Results might not be 100% accurate."
-      }
-    ]
-  },
-  "oauth_config": {
-    "scopes": {
-      "bot": ["channels:history", "chat:write", "commands"]
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "channels:read",
+                "channels:history",
+                "chat:write",
+                "commands",
+                "users:read",
+                "im:read",
+                "groups:read",
+                "mpim:read",
+                "search:read.public"
+            ]
+        },
+        "pkce_enabled": false
+    },
+    "settings": {
+        "event_subscriptions": {
+            "bot_events": [
+                "app_home_opened",
+                "message.channels"
+            ]
+        },
+        "interactivity": {
+            "is_enabled": true
+        },
+        "org_deploy_enabled": true,
+        "socket_mode_enabled": true,
+        "is_mcp_enabled": false,
+        "token_rotation_enabled": false,
+        "app_level_token_rotation_enabled": false
     }
-  },
-  "settings": {
-    "event_subscriptions": {
-      "bot_events": ["app_home_opened", "message.channels"]
-    },
-    "interactivity": {
-      "is_enabled": true
-    },
-    "org_deploy_enabled": true,
-    "socket_mode_enabled": true,
-    "token_rotation_enabled": false
-  }
 }
