@@ -122,7 +122,7 @@ const sampleShortcutCallback = async ({ shortcut, ack, client, logger }) => {
                             "elements": [
                                 {
                                     type: 'mrkdwn',
-                                    text: `this may take a while, hang on`,
+                                    text: `this may take a while, hang on. ratelimits: ${maxmin} per minute`,
                                 }
                             ]}
                     ]
@@ -269,7 +269,9 @@ const sampleShortcutCallback = async ({ shortcut, ack, client, logger }) => {
                             "elements": [
                                 {
                                     type: 'mrkdwn',
-                                    text: `${is_priv?":ms-warning: *this is a private channel/dm, results may be super buggy and/or not accurate at all* ":""}results are not 100% accurate, especially on short/single-line messages or messages with no formatting.\nidentified categories: ${categories?categories:"none"}`,
+                                    text: `${/*is_priv?":ms-warning: *this is a private channel/dm, results may be super buggy and/or not accurate at all* ":*/""}results are not 100% accurate, especially on short/single-line messages or messages with no formatting.
+identified categories: ${categories?.length!==0?categories:"none"}
+ratelimits: ${maxmin} per minute`,
                                 }
                             ]}
                     ]
