@@ -18,11 +18,21 @@
                 "type": "message",
                 "callback_id": "sample_shortcut_id",
                 "description": "Check if the message was sent from mobile, PC/Web or something else (eg automated). Results might not be 100% accurate."
+            },
+            {
+                "name": "Analyze message clients",
+                "type": "message",
+                "callback_id": "shortcut_two_id",
+                "description": "For this user, sample messages from the last 90 days and analyze the clients the messages were sent with."
             }
+
         ]
     },
     "oauth_config": {
         "scopes": {
+            "user": [
+                "search:read.public"
+            ],
             "bot": [
                 "channels:read",
                 "channels:history",

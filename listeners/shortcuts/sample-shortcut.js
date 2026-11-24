@@ -1,33 +1,68 @@
+const origFetch = globalThis.fetch;
+globalThis.fetch = async (...args) => {
+  const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
+  const res = await origFetch(...args);
+  const ct = res.headers.get("content-type") || "";
+  console.log("[fetch]", res.status, ct.split(";")[0] || "(none)", "->", String(url).slice(0, 120));
+  return res;
+};
 import { setTimeout as delay } from 'timers/promises';
-const maxmin=5;
-var ratemin=new Map() // user id: [minute, prev, now]
+process.loadEnvFile()
+const maxmin=process.env.FINGERPRINTS_PER_MINUTE;
+const amin=process.env.ANALYSES_PER_MINUTE;
+const ratelimit_alg=process.env.RATELIMIT_ALG || "swc";
+console.log({maxmin,amin,ratelimit_alg})
+const aweight=maxmin/amin;
+
 var flag=false
-function makerequest(uid){
+var ratemin=new Map() // user id: [minute, prev, now] or [minute,now] in FWC
+function makerequest(uid,weight=1,minweight){
+    if(!minweight) minweight=weight
     while(flag){}
     flag=true
     const ctime= Date.now()/1000;
     const cmin= Math.floor(ctime/60)
-    const portion=ctime/60-cmin
-    var ratec=[...(ratemin.get(uid)||[-1,0,0])]
-    const xmin= ratec[0]
-    do{
-        if(cmin>xmin+1){
-            //always allowed
-            ratec=[cmin,0,1]
-            break;
-        }
-        if(cmin===xmin+1){
-            ratec=[cmin,ratec[2],1]
-            break;
-        }
-        if(cmin===xmin){
-            ratec=[cmin,ratec[1],ratec[2]+1]
-        }
-    }while(false)
-    const requests=ratec[1]*(1-portion)+ratec[2]
+    var requests
+    var ratec
+    var xmin
+    //cleanup stale entries
+    for(const [i,e] of ratemin) if(cmin>e[0]+1) ratemin.delete(i)
+    switch(ratelimit_alg){
+        case "fwc":
+            ratec=[...(ratemin.get(uid)||[-1,0])]
+            xmin=ratec[0]
+            if(cmin!==xmin){
+                ratec=[cmin,weight]
+            }else{
+                ratec=[cmin,ratec[1]+weight]
+            }
+            requests=ratec[1]
+        break;
+        case "swc":
+        default:
+            const portion=ctime/60-cmin
+            ratec=[...(ratemin.get(uid)||[-1,0,0])]
+            xmin= ratec[0]
+            do{
+                if(cmin>xmin+1){
+                    //always allowed
+                    ratec=[cmin,0,weight]
+                    break;
+                }
+                if(cmin===xmin+1){
+                    ratec=[cmin,ratec[2],weight]
+                    break;
+                }
+                if(cmin===xmin){
+                    ratec=[cmin,ratec[1],ratec[2]+weight]
+                }
+            }while(false)
+            requests=ratec[1]*(1-portion)+ratec[2]
+            break
+    }
     flag=false
     try{
-        if (requests>maxmin){
+        if (requests+minweight-weight>maxmin){
             return false
         }else{
             ratemin.set(uid,ratec)
@@ -36,6 +71,25 @@ function makerequest(uid){
     }finally{
 
     }
+}
+async function sample(uid, client){
+    const after=Math.floor(Date.now()/1000)-90*60*60*24
+    const query= `from:<@${uid}>`
+    const token= process.env.SLACK_USER_TOKEN
+
+    let cursor
+    const hits=[]
+    do{
+        const sres=await (client.assistant.search.context({
+            after,query,token,cursor,
+            content_types:["messages"],channel_types:["public_channel"]
+            ,limit:1000,sort:"timestamp"
+        }))
+        cursor=sres.response_metadata.next_cursor
+        console.log({cursor})
+        hits.push(...sres.results.messages.map(e=>e.permalink))
+    }while(cursor)
+    return hits
 }
 const sampleShortcutCallback = async ({ shortcut, ack, client, logger }) => {
     try {
@@ -67,7 +121,7 @@ const sampleShortcutCallback = async ({ shortcut, ack, client, logger }) => {
                                 type: 'section',
                                 text: {
                                     type: 'mrkdwn',
-                                    text: `you have reached the ratelimit. please try again later.`,
+                                    text: `you have reached the ratelimit. please try again in 1 minute.`,
                                 }
                             },
                             {
@@ -223,7 +277,7 @@ const sampleShortcutCallback = async ({ shortcut, ack, client, logger }) => {
             rbody=JSON.stringify({permalink})
         }
         // console.log("!!! sending this: rbody /x\n",rbody,"\nx/")
-        var fetchpromise= fetch("https://2390.proxy.tanjim.org/antibot/check",{
+        var fetchpromise= fetch(`${process.env.ANTIBOT_BASE_URL}`,{
             method:"POST",headers: { Authorization: `Bearer ${process.env.ANTIBOT_API_TOKEN}`, "Content-Type": "application/json" },
             body: rbody
         })
@@ -288,5 +342,178 @@ ratelimits: ${maxmin} per minute`,
         logger.error(error);
     }
 };
+const shortcutTwoCallback = async ({ shortcut, ack, client, logger }) => {
+    try {
+        const { message, user, trigger_id } = shortcut;
+        const target=message.user
+        await ack()
+        if(!makerequest(user.id,aweight)){
+            try{
+                await client.views.open({
+                    trigger_id,
+                    view: {
+                        type: 'modal',
+                        callback_id: 'sample_view_id',
+                        title: {
+                            type: 'plain_text',
+                            text: 'ratelimit reached',
+                        },
+                        blocks: [
+                            /*{
+                        "type": "header",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "please wait",
+                            "emoji": true
+                        },
+                        "level": 1
+                    },*/
+                            {
+                                type: 'section',
+                                text: {
+                                    type: 'mrkdwn',
+                                    text: `you have reached the ratelimit. please try again in 1 minute.`,
+                                }
+                            },
+                            {
+                                "type": "context",
+                                "elements": [
+                                    {
+                                        type: 'mrkdwn',
+                                        text: `ratelimit is ${amin} per minute for analyses`,
+                                    }
+                                ]}
+                        ]
+                    },
+                });return}catch(e){
+                    if(e.data?.error=='not_found'){
+                    }else{
+                        console.error(e)
+                    }
+                }
 
-export { sampleShortcutCallback };
+        }
+        console.log({target,user})
+        var result=0
+        try{
+            result = await client.views.open({
+                trigger_id,
+                view: {
+                    type: 'modal',
+                    callback_id: 'sample_view_id',
+                    title: {
+                        type: 'plain_text',
+                        text: 'please wait...',
+                    },
+                    blocks: [
+                        /*{
+                        "type": "header",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "please wait",
+                            "emoji": true
+                        },
+                        "level": 1
+                    },*/
+                        {
+                            type: 'section',
+                            text: {
+                                type: 'mrkdwn',
+                                text: `analyzing user platforms...`,
+                            }
+                        },
+                        {
+                            "type": "context",
+                            "elements": [
+                                {
+                                    type: 'mrkdwn',
+                                    text: `this requires calling the coolton abuse API on all messages of this user in the past 3 months, so it may take some time. ratelimits: ${maxmin/aweight} per minute for analyses`,
+                                }
+                            ]}
+                    ]
+                },
+            })}catch(e){
+                if(e.data?.error=='not_found'){
+                }else{
+                    console.error(e); return
+                }
+            }
+        const hits= await sample(target,client)
+        var nones=0
+        var flags=0
+        var watches=0
+        const delaypromise= delay(500+Math.random()*1000) //for now
+        const rbody={"calls":hits.map((permalink)=>{return {permalink}})}
+        const fetchpromise= fetch(`${process.env.ANTIBOT_BASE_URL}`,{
+                method:"POST",headers: { Authorization: `Bearer ${process.env.ANTIBOT_API_TOKEN}`, "Content-Type": "application/json" },
+                body: JSON.stringify(rbody)
+            })
+        const rjson=await (await fetchpromise).json();
+        console.log("===RBODY===",JSON.stringify(rbody,null,2),"===rjson===",JSON.stringify(rjson,null,2))
+        rjson.responses.forEach((res,i)=>{
+            const {verdict,categories}=res
+            switch(verdict){
+                case 'none': nones++; break
+                case 'flag': flags++; break
+                case 'watch':watches++;break
+                default:
+                    console.log("unknown verdict ", {verdict, categories, res, "hit":hits[i] })
+            }
+
+        })
+        await Promise.all([delaypromise, fetchpromise])
+        const total=nones+flags+watches
+        try{
+            await client.views.update({
+                view_id: result.view.id,
+                view: {
+                    type: 'modal',
+                    callback_id: 'sample_view_id',
+                    title: {
+                        type: 'plain_text',
+                        text: 'results',
+                    },
+                    blocks: [
+                        {
+                            "type": "header",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "Verdict (from coolton abuse API):",
+                                "emoji": true
+                            },
+                            "level": 1
+                        },
+                        {
+                            type: 'section',
+                            text: {
+                                type: 'mrkdwn',
+                                text: `*:msn-pc: Desktop/Web/Android:* ${(100*(nones/total)).toFixed(4)}%
+*:msn-mobile-phone: iOS:* ${(100*(watches/total)).toFixed(4)}%
+*:msn-robot-3d-clean-2: Automated/Unofficial clients:*  ${(100*(flags/total)).toFixed(4)}%
+`,
+                            }
+                        },
+                        {
+                            "type": "context",
+                            "elements": [
+                                {
+                                    type: 'mrkdwn',
+                                    text: `sampled out of ${total} messages from the last 90 days.
+results are not 100% accurate, especially on short/single-line messages or messages with no formatting.
+ratelimits: ${maxmin/aweight} per minute`,
+                                }
+                            ]}
+                    ]
+                },
+            });}catch(e){
+                if(e.data?.error=='not_found'){
+                }else{
+                    console.error(e)
+                }
+            }
+
+
+
+    }catch(e){logger.error(e)}
+}
+export { sampleShortcutCallback, shortcutTwoCallback };
